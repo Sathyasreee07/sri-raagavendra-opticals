@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
-import { jwtDecode } from 'jwt-decode';
+import api from '../api/api';
 
 interface User {
   _id: string;
@@ -26,8 +25,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };
@@ -35,92 +34,109 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check if token is valid on initial load and set user state
+  // 🔹 Load user on refresh
   useEffect(() => {
     const loadUser = async () => {
-      if (token) {
-        try {
-          // Set default auth header
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-          
-          // Attempt to get user info
-          const response = await axios.get('/api/users/me');
-          
-          setUser(response.data);
-          setIsAuthenticated(true);
-          setIsAdmin(response.data.isAdmin);
-        } catch (err) {
-          // Token invalid or expired
-          localStorage.removeItem('token');
-          setToken(null);
-          setUser(null);
-          setIsAuthenticated(false);
-          setIsAdmin(false);
-          delete axios.defaults.headers.common['Authorization'];
-        }
+      if (!token) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      try {
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        const res = await api.get('/users/me');
+
+        setUser(res.data);
+        setIsAuthenticated(true);
+        setIsAdmin(res.data.isAdmin);
+      } catch (err) {
+        localStorage.removeItem('token');
+        setToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsAdmin(false);
+        delete api.defaults.headers.common['Authorization'];
+      } finally {
+        setLoading(false);
+      }
     };
-    
+
     loadUser();
   }, [token]);
 
+  // 🔹 LOGIN
   const login = async (email: string, password: string) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await axios.post('/api/auth/login', { email, password });
-      const { token, user } = response.data;
-      
+
+      const res = await api.post('/auth/login', { email, password });
+
+      const { token, user } = res.data;
+
       localStorage.setItem('token', token);
       setToken(token);
-      
-      // Set default auth header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
       setUser(user);
       setIsAuthenticated(true);
       setIsAdmin(user.isAdmin);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed');
+      setIsAuthenticated(false);
     } finally {
       setLoading(false);
     }
   };
 
+  // 🔹 REGISTER
   const register = async (name: string, email: string, password: string) => {
     try {
       setLoading(true);
       setError(null);
-      
-      await axios.post('/api/auth/register', { name, email, password });
-      
-      // Auto login after registration
-      await login(email, password);
+
+      const res = await api.post('/auth/register', {
+        name,
+        email,
+        password,
+      });
+
+      const { token, user } = res.data;
+
+      localStorage.setItem('token', token);
+      setToken(token);
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+      setUser(user);
+      setIsAuthenticated(true);
+      setIsAdmin(user.isAdmin);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Registration failed');
+      setIsAuthenticated(false);
+    } finally {
       setLoading(false);
     }
   };
 
+  // 🔹 LOGOUT
   const logout = () => {
     localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
-    setToken(null);
+    delete api.defaults.headers.common['Authorization'];
     setUser(null);
+    setToken(null);
     setIsAuthenticated(false);
     setIsAdmin(false);
   };
 
-  const clearError = () => {
-    setError(null);
-  };
+  const clearError = () => setError(null);
 
   return (
     <AuthContext.Provider
@@ -134,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        clearError
+        clearError,
       }}
     >
       {children}

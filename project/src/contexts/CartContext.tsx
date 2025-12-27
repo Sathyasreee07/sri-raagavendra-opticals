@@ -34,12 +34,14 @@ const initialState: CartState = {
   totalPrice: 0,
 };
 
-const calculateTotals = (items: CartItem[]): { totalItems: number; totalPrice: number } => {
+// 🔹 Calculate totals safely
+const calculateTotals = (items: CartItem[]) => {
   return items.reduce(
-    (acc, item) => ({
-      totalItems: acc.totalItems + item.quantity,
-      totalPrice: acc.totalPrice + item.price * item.quantity,
-    }),
+    (acc, item) => {
+      acc.totalItems += item.quantity;
+      acc.totalPrice += item.price * item.quantity;
+      return acc;
+    },
     { totalItems: 0, totalPrice: 0 }
   );
 };
@@ -47,71 +49,62 @@ const calculateTotals = (items: CartItem[]): { totalItems: number; totalPrice: n
 const cartReducer = (state: CartState, action: CartAction): CartState => {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const existingItemIndex = state.items.findIndex(item => item._id === action.payload._id);
-      
+      const existingItem = state.items.find(item => item._id === action.payload._id);
+
       let updatedItems: CartItem[];
-      
-      if (existingItemIndex >= 0) {
-        // Item exists, update quantity
-        updatedItems = state.items.map((item, index) => {
-          if (index === existingItemIndex) {
-            return { ...item, quantity: item.quantity + action.payload.quantity };
-          }
-          return item;
-        });
+
+      if (existingItem) {
+        updatedItems = state.items.map(item =>
+          item._id === action.payload._id
+            ? { ...item, quantity: item.quantity + action.payload.quantity }
+            : item
+        );
       } else {
-        // Add new item
-        updatedItems = [...state.items, action.payload];
+        updatedItems = [...state.items, { ...action.payload, quantity: Math.max(1, action.payload.quantity) }];
       }
-      
+
       const { totalItems, totalPrice } = calculateTotals(updatedItems);
-      
+
       return {
-        ...state,
         items: updatedItems,
         totalItems,
         totalPrice,
       };
     }
-    
+
     case 'REMOVE_ITEM': {
       const updatedItems = state.items.filter(item => item._id !== action.payload);
       const { totalItems, totalPrice } = calculateTotals(updatedItems);
-      
+
       return {
-        ...state,
         items: updatedItems,
         totalItems,
         totalPrice,
       };
     }
-    
+
     case 'UPDATE_QUANTITY': {
       const { id, quantity } = action.payload;
-      
-      // Ensure quantity is at least 1
-      const validQuantity = Math.max(1, quantity);
-      
-      const updatedItems = state.items.map(item => {
-        if (item._id === id) {
-          return { ...item, quantity: validQuantity };
-        }
-        return item;
-      });
-      
+
+      const updatedItems = state.items.map(item =>
+        item._id === id
+          ? { ...item, quantity: Math.max(1, quantity) }
+          : item
+      );
+
       const { totalItems, totalPrice } = calculateTotals(updatedItems);
-      
+
       return {
-        ...state,
         items: updatedItems,
         totalItems,
         totalPrice,
       };
     }
-    
+
     case 'CLEAR_CART':
+      localStorage.removeItem('cart');
       return initialState;
-      
+
     default:
       return state;
   }
@@ -121,50 +114,34 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const useCart = () => {
   const context = useContext(CartContext);
-  if (context === undefined) {
-    throw new Error('useCart must be used within a CartProvider');
+  if (!context) {
+    throw new Error('useCart must be used within CartProvider');
   }
   return context;
 };
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize state from localStorage if available
   const [cart, dispatch] = useReducer(cartReducer, initialState, () => {
-    const savedCart = localStorage.getItem('cart');
-    return savedCart ? JSON.parse(savedCart) : initialState;
+    try {
+      const savedCart = localStorage.getItem('cart');
+      return savedCart ? JSON.parse(savedCart) : initialState;
+    } catch {
+      return initialState;
+    }
   });
-  
-  // Save cart to localStorage whenever it changes
+
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
-  
-  const addItem = (item: CartItem) => {
-    dispatch({ type: 'ADD_ITEM', payload: item });
-  };
-  
-  const removeItem = (id: string) => {
-    dispatch({ type: 'REMOVE_ITEM', payload: id });
-  };
-  
-  const updateQuantity = (id: string, quantity: number) => {
+
+  const addItem = (item: CartItem) => dispatch({ type: 'ADD_ITEM', payload: item });
+  const removeItem = (id: string) => dispatch({ type: 'REMOVE_ITEM', payload: id });
+  const updateQuantity = (id: string, quantity: number) =>
     dispatch({ type: 'UPDATE_QUANTITY', payload: { id, quantity } });
-  };
-  
-  const clearCart = () => {
-    dispatch({ type: 'CLEAR_CART' });
-  };
-  
+  const clearCart = () => dispatch({ type: 'CLEAR_CART' });
+
   return (
-    <CartContext.Provider
-      value={{
-        cart,
-        addItem,
-        removeItem,
-        updateQuantity,
-        clearCart,
-      }}
-    >
+    <CartContext.Provider value={{ cart, addItem, removeItem, updateQuantity, clearCart }}>
       {children}
     </CartContext.Provider>
   );

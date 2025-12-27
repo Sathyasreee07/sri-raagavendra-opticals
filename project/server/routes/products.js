@@ -1,42 +1,54 @@
-import express from 'express';
-import Product from '../models/Product.js';
-
+import express from "express";
+import Product from "../models/Product.js";
+import { protect, admin } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// POST /api/products - Create new product
-router.post('/', async (req, res) => {
+/* ============================
+   CREATE PRODUCT (ADMIN)
+============================ */
+/**
+ * @route   POST /api/products
+ * @desc    Create a new product
+ * @access  Private/Admin
+ */
+router.post("/", protect, admin, async (req, res) => {
   try {
     const {
       name,
       slug,
       description,
       price,
-      discount,
-      images,
+      discount = 0,
+      images = [],
       category,
       type,
       brand,
       stock,
-      isActive,
-      isFeatured,
-      isNew,
-      specifications
+      isActive = true,
+      isFeatured = false,
+      isNew = false,
+      specifications = {},
     } = req.body;
 
-    // Validate required fields (optional, mongoose will also validate)
-    if (!name || !slug || !description || !price || !category || !type || !brand || stock == null) {
-      return res.status(400).json({ message: 'Missing required fields' });
+    // Required fields validation
+    if (!name || !slug || !description || !price || !category || !type || !brand || stock === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
     }
 
-    // Check if slug already exists to avoid duplicates
+    // Check duplicate slug
     const existingProduct = await Product.findOne({ slug });
     if (existingProduct) {
-      return res.status(400).json({ message: 'Product with this slug already exists' });
+      return res.status(400).json({
+        success: false,
+        message: "Product with this slug already exists",
+      });
     }
 
-    // Create new product instance
-    const newProduct = new Product({
+    const product = new Product({
       name,
       slug,
       description,
@@ -50,24 +62,46 @@ router.post('/', async (req, res) => {
       isActive,
       isFeatured,
       isNew,
-      specifications
+      specifications,
     });
 
-    const savedProduct = await newProduct.save();
-    return res.status(201).json(savedProduct);
+    const savedProduct = await product.save();
 
+    res.status(201).json({
+      success: true,
+      product: savedProduct,
+    });
   } catch (error) {
-    console.error('Error adding product:', error);
-    return res.status(500).json({ message: 'Server error', error: error.message });
+    console.error("Create product error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create product",
+    });
   }
 });
-// GET /api/products - Get all products with optional filtering/sorting
-// GET /api/products - Get all products with optional filtering and sorting
+
+/* ============================
+   GET PRODUCTS (PUBLIC)
+============================ */
+/**
+ * @route   GET /api/products
+ * @desc    Get all products with filters, sorting & pagination
+ * @access  Public
+ */
 router.get("/", async (req, res) => {
   try {
-    const { sortBy, category, type, brand, isFeatured, isNew } = req.query;
+    const {
+      category,
+      type,
+      brand,
+      isFeatured,
+      isNew,
+      sortBy,
+      page = 1,
+      limit = 12,
+    } = req.query;
 
-    const query = {};
+    const query = { isActive: true };
 
     if (category) query.category = category;
     if (type) query.type = type;
@@ -77,19 +111,76 @@ router.get("/", async (req, res) => {
 
     let sortOption = {};
 
-    if (sortBy === "newest") {
-      sortOption.createdAt = -1;
-    } else if (sortBy === "price-low") {
-      sortOption.price = 1;
-    } else if (sortBy === "price-high") {
-      sortOption.price = -1;
+    switch (sortBy) {
+      case "newest":
+        sortOption.createdAt = -1;
+        break;
+      case "price-low":
+        sortOption.price = 1;
+        break;
+      case "price-high":
+        sortOption.price = -1;
+        break;
+      default:
+        sortOption.createdAt = -1;
     }
 
-    const products = await Product.find(query).sort(sortOption);
-    res.json(products);
+    const skip = (page - 1) * limit;
+
+    const total = await Product.countDocuments(query);
+    const products = await Product.find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(Number(limit));
+
+    res.json({
+      success: true,
+      products,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (error) {
     console.error("Fetch products error:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch products" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch products",
+    });
+  }
+});
+
+/* ============================
+   GET SINGLE PRODUCT BY SLUG
+============================ */
+/**
+ * @route   GET /api/products/:slug
+ * @desc    Get product by slug
+ * @access  Public
+ */
+router.get("/:slug", async (req, res) => {
+  try {
+    const product = await Product.findOne({
+      slug: req.params.slug,
+      isActive: true,
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      product,
+    });
+  } catch (error) {
+    console.error("Get product error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get product",
+    });
   }
 });
 

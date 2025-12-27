@@ -1,27 +1,30 @@
-import express from 'express';
-import User from '../models/User.js';
-import Product from '../models/Product.js';
-import { protect } from '../middleware/auth.js';
+import express from "express";
+import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// This route is for server-side cart management, which is optional
-// since we're already using client-side cart management
-// Kept for future reference or extension
+/* ============================
+   CART ROUTES
+   (Client-side managed cart)
+============================ */
 
-// @route   GET /api/cart
-// @desc    Get user cart
-// @access  Private
-router.get('/', protect, async (req, res) => {
+/**
+ * @route   GET /api/cart
+ * @desc    Cart handled on client side
+ * @access  Private
+ */
+router.get("/", protect, async (req, res) => {
   try {
-    res.json({
-      message: 'Cart is managed on the client side'
+    res.status(200).json({
+      success: true,
+      message: "Cart is managed on the client side",
+      cart: [],
     });
   } catch (error) {
-    console.error('Get cart error:', error);
+    console.error("Get cart error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to get cart'
+      message: "Failed to fetch cart",
     });
   }
 });

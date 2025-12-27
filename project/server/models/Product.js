@@ -1,105 +1,158 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const productSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Please provide a product name'],
-    trim: true,
-    maxlength: [100, 'Product name cannot be more than 100 characters']
-  },
-  slug: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true
-  },
-  description: {
-    type: String,
-    required: [true, 'Please provide product description'],
-    maxlength: [2000, 'Description cannot be more than 2000 characters']
-  },
-  price: {
-    type: Number,
-    required: [true, 'Please provide product price'],
-    min: [0, 'Price must be positive']
-  },
-  discount: {
-    type: Number,
-    default: 0,
-    min: [0, 'Discount cannot be negative'],
-    max: [100, 'Discount cannot be more than 100%']
-  },
-  images: [{
-    url: String,
-    alt: String
-  }],
-  category: {
-    type: String,
-    required: [true, 'Please provide product category'],
-    enum: ['men', 'women', 'kids', 'sunglasses-men', 'sunglasses-women', 'colored-lenses', 'daily-lenses', 'accessories']
-  },
-  type: {
-    type: String,
-    required: [true, 'Please provide product type'],
-    enum: ['eyeglasses', 'sunglasses', 'contact-lenses', 'accessories']
-  },
-  brand: {
-    type: String,
-    required: [true, 'Please provide product brand']
-  },
-  stock: {
-    type: Number,
-    required: [true, 'Please provide stock quantity'],
-    min: [0, 'Stock cannot be negative']
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  isFeatured: {
-    type: Boolean,
-    default: false
-  },
-  isNew: {
-    type: Boolean,
-    default: false
-  },
-  rating: {
-    type: Number,
-    default: 0,
-    min: 0,
-    max: 5
-  },
-  numReviews: {
-    type: Number,
-    default: 0
-  },
-  specifications: {
-    frameWidth: String,
-    frameHeight: String,
-    templeLength: String,
-    bridgeWidth: String,
-    frameMaterial: String,
-    lensMaterial: String,
-    weight: String,
-    color: String,
-    shape: String,
-    gender: {
+const productSchema = new mongoose.Schema(
+  {
+    name: {
       type: String,
-      enum: ['Men', 'Women', 'Unisex', 'Kids']
+      required: true,
+      trim: true,
+      maxlength: 100
+    },
+
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      index: true
+    },
+
+    description: {
+      type: String,
+      required: true,
+      maxlength: 2000
+    },
+
+    price: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+
+    discount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+
+    images: [
+      {
+        url: {
+          type: String,
+          required: true
+        },
+        alt: String
+      }
+    ],
+
+    category: {
+      type: String,
+      required: true,
+      enum: [
+        "men",
+        "women",
+        "kids",
+        "sunglasses-men",
+        "sunglasses-women",
+        "colored-lenses",
+        "daily-lenses",
+        "accessories"
+      ],
+      index: true
+    },
+
+    type: {
+      type: String,
+      required: true,
+      enum: ["eyeglasses", "sunglasses", "contact-lenses", "accessories"],
+      index: true
+    },
+
+    brand: {
+      type: String,
+      required: true,
+      index: true
+    },
+
+    stock: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true
+    },
+
+    isFeatured: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+
+    isNew: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+
+    rating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5
+    },
+
+    numReviews: {
+      type: Number,
+      default: 0
+    },
+
+    specifications: {
+      frameWidth: String,
+      frameHeight: String,
+      templeLength: String,
+      bridgeWidth: String,
+      frameMaterial: String,
+      lensMaterial: String,
+      weight: String,
+      color: String,
+      shape: String,
+      gender: {
+        type: String,
+        enum: ["Men", "Women", "Unisex", "Kids"]
+      }
     }
+  },
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   }
-}, {
-  timestamps: true
+);
+
+/* ============================
+   VIRTUAL: FINAL PRICE
+============================ */
+productSchema.virtual("finalPrice").get(function () {
+  if (this.discount > 0) {
+    return Math.round(this.price - (this.price * this.discount) / 100);
+  }
+  return this.price;
 });
 
-// Add text index for search functionality
+/* ============================
+   SEARCH INDEX
+============================ */
 productSchema.index({
-  name: 'text',
-  description: 'text',
-  brand: 'text'
+  name: "text",
+  description: "text",
+  brand: "text"
 });
 
-const Product = mongoose.model('Product', productSchema);
+const Product = mongoose.model("Product", productSchema);
 
 export default Product;

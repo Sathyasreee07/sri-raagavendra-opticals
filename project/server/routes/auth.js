@@ -5,25 +5,32 @@ import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Admin credentials
-const ADMIN_EMAIL = "admin@sriragavendraopticals.com";
-const ADMIN_PASSWORD = "admin123";
-
-// Generate JWT token
+/* ============================
+   JWT TOKEN GENERATOR
+============================ */
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || "mysecretkey", {
-    expiresIn: "30d",
-  });
+  return jwt.sign(
+    { id },
+    process.env.JWT_SECRET,
+    { expiresIn: "30d" }
+  );
 };
 
-// @route   POST /api/auth/register
-// @desc    Register a new user
-// @access  Public
+/* ============================
+   REGISTER USER
+============================ */
+// POST /api/auth/register
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
     const userExists = await User.findOne({ email });
 
     if (userExists) {
@@ -33,21 +40,16 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Create new user
     const user = await User.create({
       name,
       email,
       password,
-      isAdmin: false, // Ensure new registrations are not admin
+      isAdmin: false,
     });
 
-    // Generate token
-    const token = generateToken(user._id);
-
-    // Return user data and token
     res.status(201).json({
       success: true,
-      token,
+      token: generateToken(user._id),
       user: {
         _id: user._id,
         name: user.name,
@@ -56,67 +58,50 @@ router.post("/register", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Registration error:", error);
+    console.error("Register error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || "Registration failed",
+      message: "Registration failed",
     });
   }
 });
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user & get token
-// @access  Public
+/* ============================
+   LOGIN USER / ADMIN
+============================ */
+// POST /api/auth/login
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check for admin login
-    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-      // Find or create admin user
-      let adminUser = await User.findOne({ email: ADMIN_EMAIL });
-
-      if (!adminUser) {
-        adminUser = await User.create({
-          name: "Admin",
-          email: ADMIN_EMAIL,
-          password: ADMIN_PASSWORD,
-          isAdmin: true,
-        });
-      }
-
-      const token = generateToken(adminUser._id);
-
-      return res.json({
-        success: true,
-        token,
-        user: {
-          _id: adminUser._id,
-          name: adminUser.name,
-          email: adminUser.email,
-          isAdmin: true,
-        },
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
       });
     }
 
-    // Regular user login
     const user = await User.findOne({ email }).select("+password");
 
-    // Check if user exists and password matches
-    if (!user || !(await user.comparePassword(password))) {
+    if (!user) {
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
       });
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    const isMatch = await user.comparePassword(password);
 
-    // Return user data and token
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
     res.json({
       success: true,
-      token,
+      token: generateToken(user._id),
       user: {
         _id: user._id,
         name: user.name,
@@ -128,43 +113,47 @@ router.post("/login", async (req, res) => {
     console.error("Login error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || "Login failed",
+      message: "Login failed",
     });
   }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current user profile
-// @access  Private
+/* ============================
+   GET CURRENT USER
+============================ */
+// GET /api/auth/me
 router.get("/me", protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
     res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      address: user.address,
-      isAdmin: user.isAdmin,
+      success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        address: user.address,
+        isAdmin: user.isAdmin,
+      },
     });
   } catch (error) {
-    console.error("Get profile error:", error);
+    console.error("Profile error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || "Failed to get profile",
+      message: "Failed to fetch profile",
     });
   }
 });
 
-// @route   POST /api/auth/forgot-password
-// @desc    Request password reset
-// @access  Public
+/* ============================
+   FORGOT PASSWORD
+============================ */
+// POST /api/auth/forgot-password
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Find user by email
     const user = await User.findOne({ email });
 
     if (!user) {
@@ -174,29 +163,27 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    // Generate reset token (in a real app, send this via email)
-    // For demo purposes, we'll just return it
     const resetToken = jwt.sign(
       { id: user._id },
-      process.env.JWT_RESET_SECRET || "resetsecretekey",
+      process.env.JWT_RESET_SECRET,
       { expiresIn: "1h" }
     );
 
-    // Save token and expiry in user
     user.passwordResetToken = resetToken;
-    user.passwordResetExpires = Date.now() + 3600000; // 1 hour
+    user.passwordResetExpires = Date.now() + 60 * 60 * 1000;
     await user.save();
 
+    // In production → send email
     res.json({
       success: true,
-      message: "Password reset email sent",
-      resetToken, // In production, don't return this
+      message: "Password reset link generated",
+      resetToken, // ⚠️ remove in production
     });
   } catch (error) {
     console.error("Forgot password error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || "Failed to process request",
+      message: "Failed to process request",
     });
   }
 });

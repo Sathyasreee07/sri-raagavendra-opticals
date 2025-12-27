@@ -1,50 +1,56 @@
-import express from 'express';
-import Order from '../models/Order.js';
-import Product from '../models/Product.js';
-import { protect, admin } from '../middleware/auth.js';
+import express from "express";
+import Order from "../models/Order.js";
+import Product from "../models/Product.js";
+import { protect, admin } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// @route   POST /api/orders
-// @desc    Create a new order
-// @access  Private
-router.post('/', protect, async (req, res) => {
+/* ============================
+   CREATE ORDER
+============================ */
+
+/**
+ * @route   POST /api/orders
+ * @desc    Create a new order
+ * @access  Private
+ */
+router.post("/", protect, async (req, res) => {
   try {
     const {
       orderItems,
       shippingAddress,
       paymentMethod,
-      taxPrice,
-      shippingPrice,
-      totalPrice
+      taxPrice = 0,
+      shippingPrice = 0,
+      totalPrice,
     } = req.body;
-    
+
     if (!orderItems || orderItems.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No order items'
+        message: "No order items provided",
       });
     }
-    
-    // Check if all items are in stock
+
+    // Validate stock availability
     for (const item of orderItems) {
       const product = await Product.findById(item.product);
-      
+
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: `Product not found: ${item.product}`
+          message: `Product not found: ${item.product}`,
         });
       }
-      
+
       if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `${product.name} is out of stock. Only ${product.stock} available.`
+          message: `${product.name} has only ${product.stock} items left`,
         });
       }
     }
-    
+
     // Create order
     const order = new Order({
       user: req.user._id,
@@ -53,201 +59,248 @@ router.post('/', protect, async (req, res) => {
       paymentMethod,
       taxPrice,
       shippingPrice,
-      totalPrice
+      totalPrice,
+      status: "Processing",
     });
-    
-    // Update product stock
+
+    // Reduce stock
     for (const item of orderItems) {
-      const product = await Product.findById(item.product);
-      product.stock -= item.quantity;
-      await product.save();
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { stock: -item.quantity },
+      });
     }
-    
+
     const createdOrder = await order.save();
-    
-    res.status(201).json(createdOrder);
+
+    res.status(201).json({
+      success: true,
+      order: createdOrder,
+    });
   } catch (error) {
-    console.error('Create order error:', error);
+    console.error("Create order error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to create order'
+      message: "Failed to create order",
     });
   }
 });
 
-// @route   GET /api/orders/myorders
-// @desc    Get logged in user's orders
-// @access  Private
-router.get('/myorders', protect, async (req, res) => {
+/* ============================
+   USER ORDERS
+============================ */
+
+/**
+ * @route   GET /api/orders/myorders
+ * @desc    Get logged-in user's orders
+ * @access  Private
+ */
+router.get("/myorders", protect, async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id });
-    res.json(orders);
+    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      orders,
+    });
   } catch (error) {
-    console.error('Get my orders error:', error);
+    console.error("Get my orders error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to get orders'
+      message: "Failed to get orders",
     });
   }
 });
 
-// @route   GET /api/orders/:id
-// @desc    Get order by ID
-// @access  Private
-router.get('/:id', protect, async (req, res) => {
+/**
+ * @route   GET /api/orders/:id
+ * @desc    Get order by ID
+ * @access  Private
+ */
+router.get("/:id", protect, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id).populate('user', 'name email');
-    
-    // Check if order exists
+    const order = await Order.findById(req.params.id).populate(
+      "user",
+      "name email"
+    );
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
-    
-    // Check if the order belongs to the logged in user or if the user is an admin
-    if (order.user._id.toString() !== req.user._id.toString() && !req.user.isAdmin) {
+
+    if (
+      order.user._id.toString() !== req.user._id.toString() &&
+      !req.user.isAdmin
+    ) {
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to view this order'
+        message: "Not authorized to view this order",
       });
     }
-    
-    res.json(order);
+
+    res.json({
+      success: true,
+      order,
+    });
   } catch (error) {
-    console.error('Get order error:', error);
+    console.error("Get order error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to get order'
+      message: "Failed to get order",
     });
   }
 });
 
-// @route   PUT /api/orders/:id/pay
-// @desc    Update order to paid
-// @access  Private
-router.put('/:id/pay', protect, async (req, res) => {
+/* ============================
+   PAYMENT
+============================ */
+
+/**
+ * @route   PUT /api/orders/:id/pay
+ * @desc    Mark order as paid
+ * @access  Private
+ */
+router.put("/:id/pay", protect, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-    
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
-    
-    // Update order
+
     order.isPaid = true;
     order.paidAt = Date.now();
     order.paymentResult = {
       id: req.body.id,
       status: req.body.status,
       update_time: req.body.update_time,
-      email_address: req.body.email_address
+      email_address: req.body.email_address,
     };
-    
+
     const updatedOrder = await order.save();
-    
-    res.json(updatedOrder);
+
+    res.json({
+      success: true,
+      order: updatedOrder,
+    });
   } catch (error) {
-    console.error('Update order to paid error:', error);
+    console.error("Payment update error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to update order'
+      message: "Failed to update payment",
     });
   }
 });
 
-// ADMIN ROUTES
+/* ============================
+   ADMIN ROUTES
+============================ */
 
-// @route   GET /api/orders
-// @desc    Get all orders
-// @access  Private/Admin
-router.get('/', protect, admin, async (req, res) => {
+/**
+ * @route   GET /api/orders
+ * @desc    Get all orders
+ * @access  Private/Admin
+ */
+router.get("/", protect, admin, async (req, res) => {
   try {
-    const orders = await Order.find({}).populate('user', 'name email');
-    res.json(orders);
+    const orders = await Order.find({})
+      .populate("user", "name email")
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      orders,
+    });
   } catch (error) {
-    console.error('Get all orders error:', error);
+    console.error("Get all orders error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to get orders'
+      message: "Failed to get orders",
     });
   }
 });
 
-// @route   PUT /api/orders/:id/deliver
-// @desc    Update order to delivered
-// @access  Private/Admin
-router.put('/:id/deliver', protect, admin, async (req, res) => {
+/**
+ * @route   PUT /api/orders/:id/deliver
+ * @desc    Mark order as delivered
+ * @access  Private/Admin
+ */
+router.put("/:id/deliver", protect, admin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-    
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
-    
-    // Update order
+
     order.isDelivered = true;
     order.deliveredAt = Date.now();
-    order.status = 'Delivered';
+    order.status = "Delivered";
     order.trackingNumber = req.body.trackingNumber || order.trackingNumber;
-    
+
     const updatedOrder = await order.save();
-    
-    res.json(updatedOrder);
+
+    res.json({
+      success: true,
+      order: updatedOrder,
+    });
   } catch (error) {
-    console.error('Update order to delivered error:', error);
+    console.error("Deliver order error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to update order'
+      message: "Failed to update delivery",
     });
   }
 });
 
-// @route   PUT /api/orders/:id/status
-// @desc    Update order status
-// @access  Private/Admin
-router.put('/:id/status', protect, admin, async (req, res) => {
+/**
+ * @route   PUT /api/orders/:id/status
+ * @desc    Update order status
+ * @access  Private/Admin
+ */
+router.put("/:id/status", protect, admin, async (req, res) => {
   try {
     const { status, trackingNumber } = req.body;
-    
+
     const order = await Order.findById(req.params.id);
-    
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: 'Order not found'
+        message: "Order not found",
       });
     }
-    
-    // Update order status
+
     order.status = status;
-    
-    // Update tracking number if provided
+
     if (trackingNumber) {
       order.trackingNumber = trackingNumber;
     }
-    
-    // If status is delivered, update delivered status
-    if (status === 'Delivered') {
+
+    if (status === "Delivered") {
       order.isDelivered = true;
       order.deliveredAt = Date.now();
     }
-    
+
     const updatedOrder = await order.save();
-    
-    res.json(updatedOrder);
+
+    res.json({
+      success: true,
+      order: updatedOrder,
+    });
   } catch (error) {
-    console.error('Update order status error:', error);
+    console.error("Update order status error:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to update order status'
+      message: "Failed to update order status",
     });
   }
 });
